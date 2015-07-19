@@ -1,0 +1,1093 @@
+#!/system/bin/sh
+
+# Written by SHM
+# XDA Member ©2015
+
+# $0 is the name of the command
+# $1 first parameter
+# $2 second parameter
+# $3 third parameter etc. etc.
+# $# total number of parameters
+# $@ all the parameters will be listed
+
+VERSION=5.4.2
+
+PNGCRUSH() {
+
+	NUM=0
+	QUEUE=""
+	MAX_NPROC=$((($(echo /sys/devices/system/cpu/cpu[0-9]* | wc -w)*2)/2)) # default
+
+queue() {
+	QUEUE="$QUEUE $1"
+	NUM=$(($NUM+1))
+}
+
+regeneratequeue() {
+	OLDREQUEUE=$QUEUE
+	QUEUE=""
+	NUM=0
+	for PID in $OLDREQUEUE; do
+		if [ -d /proc/$PID ]; then
+			QUEUE="$QUEUE $PID"
+			NUM=$(($NUM+1))
+		fi
+	done
+}
+
+checkqueue() {
+	OLDCHQUEUE=$QUEUE
+	for PID in $OLDCHQUEUE; do
+		if [ ! -d /proc/$PID ]; then
+			regeneratequeue # at least one PID has finished
+			break
+		fi
+	done
+}
+
+	# Find all PNG images to be optimized.
+	for line in $(find "${P_IMAGES}" -type f -iname "*.png"); do
+		# Remember the directory and filename
+		local IMAGEFILE="$(basename "${line}")"
+		local IMAGEFILEDIR="$(dirname "${line}")"
+
+		# Inform user which image is being optimized then conduct the optimization.
+		echo " "
+		echo Optimizing "${IMAGEFILE}"
+		pngcrush "${IMAGEFILEDIR}"/"${IMAGEFILE}" "${IMAGEFILEDIR}"/"${IMAGEFILE%.png}-crushed.png" &> /dev/null && mv "${IMAGEFILEDIR}"/"${IMAGEFILE%.png}-crushed.png" "${IMAGEFILEDIR}"/"${IMAGEFILE}" &
+
+		PID=$!
+		queue $PID
+
+		while [ $NUM -ge $MAX_NPROC ]; do
+			checkqueue
+			#sleep 0.4
+		done
+
+	done
+	wait # wait for all processes to finish before exit
+
+	if [ $OPT == "5" ]; then
+		HEADSUP
+	fi
+}
+
+GOTOTWRPIMAGE() {
+
+	NUM=0
+	QUEUE=""
+	MAX_NPROC=$((($(echo /sys/devices/system/cpu/cpu[0-9]* | wc -w)*3)/2)) # default
+	MAX_NPROC=$(($MAX_NPROC+1))
+
+queue() {
+	QUEUE="$QUEUE $1"
+	NUM=$(($NUM+1))
+}
+
+regeneratequeue() {
+	OLDREQUEUE=$QUEUE
+	QUEUE=""
+	NUM=0
+	for PID in $OLDREQUEUE; do
+		if [ -d /proc/$PID ]; then
+			QUEUE="$QUEUE $PID"
+			NUM=$(($NUM+1))
+		fi
+	done
+}
+
+checkqueue() {
+	OLDCHQUEUE=$QUEUE
+	for PID in $OLDCHQUEUE; do
+		if [ ! -d /proc/$PID ]; then
+			regeneratequeue # at least one PID has finished
+			break
+		fi
+	done
+}
+
+	# Find the images to be ported.
+	for line in $(find "${P_IMAGES}" -type f -iname "*.png" -o -iname "*.jpg"); do
+		# Remember the directory and filename
+		local IMAGEFILE="$(basename "${line}")"
+		local IMAGEFILEDIR="$(dirname "${line}")"
+
+		# Remember width and height
+		SIZEW=$(gm identify -format "%w" "${IMAGEFILEDIR}"/"${IMAGEFILE}")
+		SIZEH=$(gm identify -format "%h" "${IMAGEFILEDIR}"/"${IMAGEFILE}")
+
+		# Calculate old size for new size of each image.
+		# Round fractions up and down for each image.
+		FINALW=$(awk 'BEGIN{print int("'$BASEW'"/("'$PORTW'"/"'$SIZEW'")+0.5)}')
+		FINALH=$(awk 'BEGIN{print int("'$BASEH'"/("'$PORTH'"/"'$SIZEH'")+0.5)}')
+
+		# Inform user of the change and conduct the change
+		echo " "
+		echo Porting "${IMAGEFILE}" from $SIZEW'x'$SIZEH to $FINALW'x'$FINALH
+		# Convert image to new sizes
+		gm convert "${IMAGEFILEDIR}"/"${IMAGEFILE}" -scale $FINALW'x'$FINALH! "${IMAGEFILEDIR}"/"${IMAGEFILE}" &
+
+		PID=$!
+		queue $PID
+
+		while [ $NUM -ge $MAX_NPROC ]; do
+			checkqueue
+			#sleep 0.4
+		done
+	done
+	wait # wait for all processes to finish before exit
+
+	if [ $OPT == "1" ]; then
+		HEADSUP
+	fi
+}
+
+TWRPUILOOP() {
+# Some themes have multiple xml files.
+# Find and port all based on targeted directory.
+# No user read input is required.
+
+count=0
+for XML_FILE in $(find "${PORT_UI}" -type f -iname "*.xml"); do
+	count=$(($count+1))
+	XML_FILE=$(basename ${XML_FILE})
+	# Store filenames in array
+	file_array[$count]=${XML_FILE}
+	SELECTION=$count
+	file_chosen=${file_array[$SELECTION]}
+	GOTOTWRPUI
+done
+
+# Go back to main when loop is completed
+HEADSUP
+}
+
+
+GOTOTWRPUI() {
+# Call this function during the while loop.
+CALCULATE_WIDTH() {
+		# Calculate old size for new size of each image.
+		# Round fractions up and down for each image.
+		FINALW=$(awk 'BEGIN{print int("'$BASEW'"/("'$PORTW'"/"'$SIZEW'")+0.5)}')
+}
+
+# Call this function during the while loop.
+CALCULATE_HEIGHT() {
+		# Calculate old size for new size of each image.
+		# Round fractions up and down for each image.
+		FINALH=$(awk 'BEGIN{print int("'$BASEH'"/("'$PORTH'"/"'$SIZEH'")+0.5)}')
+}
+
+# Call this function in the while loop for values which needs assistance from the human mind.
+DONT_KNOW_JACK() {
+		if [ "$HUMAN_ANSWER" == "h" -o "$HUMAN_ANSWER" == "H" ] ; then
+			# Need this variable to calculate.
+			SIZEH="$VALUE_CONFIRM"
+			CALCULATE_HEIGHT
+			echo " "
+			echo "Porting value='$VALUE_CONFIRM' to value='$FINALH'"
+			 # Change old value to new value based on line number.
+			 sed -i ''"$location"'s/'"$VALUE_CONFIRM"'/'"$FINALH"'/g' "${PORT_UI}"/"${file_chosen}"
+		else
+			# Need this variable to calculate.
+			SIZEW="$VALUE_CONFIRM"
+			CALCULATE_WIDTH
+			echo " "
+			echo "Porting value='$VALUE_CONFIRM' to value='$FINALW'"
+			 # Change old value to new value based on line number.
+			 sed -i ''"$location"'s/'"$VALUE_CONFIRM"'/'"$FINALW"'/g' "${PORT_UI}"/"${file_chosen}"
+		fi
+}
+
+# Search for x values.
+XX() {
+
+####################
+####################
+
+touch "${PORT_UI}"/x.txt
+# Get all x values and line numbers.
+egrep -on ' x="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/x.txt
+
+# Begin while loop
+clear; while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+X=$(echo "$line" | egrep -o ' x="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$X" -a "$X" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEW="$X"
+	# Calculate for new value.
+	CALCULATE_WIDTH
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting x='$X' to x='$FINALW'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$X"'/'"$FINALW"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/x.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/x.txt ]; then
+	rm -rf "${PORT_UI}"/x.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for y values.
+YY() {
+
+####################
+####################
+
+touch "${PORT_UI}"/y.txt
+# Get all y values and line numbers.
+egrep -on ' y="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/y.txt
+
+# Begin while loop
+while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+Y=$(echo "$line" | egrep -o ' y="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$Y" -a "$Y" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEH="$Y"
+	# Calculate for new value.
+	CALCULATE_HEIGHT
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting y='$Y' to y='$FINALH'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$Y"'/'"$FINALH"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/y.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/y.txt ]; then
+	rm -rf "${PORT_UI}"/y.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for width 'width=' values.
+WWIDTH() {
+
+####################
+####################
+
+touch "${PORT_UI}"/width.txt
+# Get all width values and line numbers.
+egrep -on ' width="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/width.txt
+
+# Begin while loop
+while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+WIDTH=$(echo "$line" | egrep -o ' width="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$WIDTH" -a "$WIDTH" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEW="$WIDTH"
+	# Calculate for new value.
+	CALCULATE_WIDTH
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting width='$WIDTH' to width='$FINALW'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$WIDTH"'/'"$FINALW"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/width.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/width.txt ]; then
+	rm -rf "${PORT_UI}"/width.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for height 'height=' values.
+HHEIGHT() {
+
+####################
+####################
+
+touch "${PORT_UI}"/height.txt
+# Get all height values and line numbers.
+egrep -on ' height="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/height.txt
+
+# Begin while loop
+while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+HEIGHT=$(echo "$line" | egrep -o ' height="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$HEIGHT" -a "$HEIGHT" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEH="$HEIGHT"
+	# Calculate for new value.
+	CALCULATE_HEIGHT
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting height='$HEIGHT' to height='$FINALH'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$HEIGHT"'/'"$FINALH"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/height.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/height.txt ]; then
+	rm -rf "${PORT_UI}"/height.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for height 'h=' values.
+HH() {
+
+####################
+####################
+
+touch "${PORT_UI}"/h.txt
+# Get all h values and line numbers.
+egrep -on ' h="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/h.txt
+
+# Begin while loop
+while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+H=$(echo "$line" | egrep -o ' h="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$H" -a "$H" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEH="$H"
+	# Calculate for new value.
+	CALCULATE_HEIGHT
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting h='$H' to h='$FINALH'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$H"'/'"$FINALH"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/h.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/h.txt ]; then
+	rm -rf "${PORT_UI}"/h.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for width 'w=' values.
+WW() {
+
+####################
+####################
+
+touch "${PORT_UI}"/w.txt
+# Get all w values and line numbers.
+egrep -on ' w="[0-9]+" ' "${PORT_UI}"/"${file_chosen}" >> "${PORT_UI}"/w.txt
+
+# Begin while loop
+while IFS= read -r line; do
+
+location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+
+W=$(echo "$line" | egrep -o ' w="[0-9]+" ' | egrep -o '[0-9]+')
+
+# If value is not 0 or null then proceed.
+if [ -n "$W" -a "$W" -gt 0 ]; then
+	# Need this variable to calculate.
+	SIZEW="$W"
+	# Calculate for new value.
+	CALCULATE_WIDTH
+	# Let user know about the old and new value.
+	echo " "
+	echo "Porting w='$W' to w='$FINALW'"
+	# Change old value to new value based on line number.
+	sed -i ''"$location"'s/'"$W"'/'"$FINALW"'/g' "${PORT_UI}"/"${file_chosen}"
+fi
+
+done < "${PORT_UI}"/w.txt
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/w.txt ]; then
+	rm -rf "${PORT_UI}"/w.txt
+fi
+
+####################
+####################
+
+}
+
+# Search for 'value' values which can be recognized by a special character or string.
+# These strings are based on the TWRP source.
+# Set variables for easy identification.
+# Suppress duplicates
+# Set human answer then call the DONT_KNOW_JACK function
+VVALUE_OVERHAUL() {
+
+####################
+####################
+
+touch "${PORT_UI}"/h.txt
+touch "${PORT_UI}"/w.txt
+
+# Get all standard variables and line numbers.
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_x"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_y"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_width"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_height"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_w"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_h"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_sliderw"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_sliderh"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_padding"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_rectw"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_recth"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_separatorheight"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_linew"); then
+	echo "$output" >> "${PORT_UI}"/w.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "_lineh"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+
+if output=$(egrep -n "variable name=" "${PORT_UI}"/"${file_chosen}" | egrep "row"); then
+	echo "$output" >> "${PORT_UI}"/h.txt
+fi
+touch "${PORT_UI}"/height.txt
+# Sort out and suppress all duplicates
+if [ -f "${PORT_UI}"/h.txt ]; then
+	sort -u "${PORT_UI}"/h.txt >> "${PORT_UI}"/height.txt
+	rm -rf "${PORT_UI}"/h.txt
+fi
+touch "${PORT_UI}"/width.txt
+if [ -f "${PORT_UI}"/w.txt ]; then
+	sort -u "${PORT_UI}"/w.txt >> "${PORT_UI}"/width.txt
+	rm -rf "${PORT_UI}"/w.txt
+fi
+
+# Begin while loop
+while IFS= read -r line; do
+	location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+	VALUE_CONFIRM=$(echo "$line" | egrep -o ' value="[0-9]+" ' | egrep -o '[0-9]+')
+		if [ -n "$location" -a "$VALUE_CONFIRM" -gt 0 -a "$VALUE_CONFIRM" -gt 1 ]; then
+			HUMAN_ANSWER=h
+			DONT_KNOW_JACK
+		fi
+done < "${PORT_UI}"/height.txt;
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/height.txt ]; then
+	rm -rf "${PORT_UI}"/height.txt
+fi
+
+# Begin while loop
+while IFS= read -r line; do
+	location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+	VALUE_CONFIRM=$(echo "$line" | egrep -o ' value="[0-9]+" ' | egrep -o '[0-9]+')
+		if [ -n "$location" -a "$VALUE_CONFIRM" -gt 0 -a "$VALUE_CONFIRM" -gt 1 ]; then
+			HUMAN_ANSWER=w
+			DONT_KNOW_JACK
+		fi
+done < "${PORT_UI}"/width.txt;
+
+# Remove unneeded txt file after while loop is finished.
+if [ -f "${PORT_UI}"/width.txt ]; then
+	rm -rf "${PORT_UI}"/width.txt
+fi
+
+####################
+####################
+
+}
+
+KEYBOARDTEMP() {
+
+# Find all known keys and extract their values.
+if keys=$(egrep -on 'key[0-9]+="[1-9a-z][0-9a-z]+' "${PORT_UI}"/"${file_chosen}"); then
+	echo "$keys" >> "${PORT_UI}"/knownkeys.txt
+	echo " "
+	echo "PORTING THE KEYBOARD TEMPLATE REAL QUICK!"
+	# Begin while loop
+	while IFS= read -r line; do
+		 location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+		# Grab key variable without value.
+		TARGETKEYS=$(echo "$line" | egrep -o 'key[0-9]+="')
+		# Need this variable to calculate
+		SIZEW=$(echo "$line" | egrep -o '[0-9]+$')
+		CALCULATE_WIDTH
+		# Inject modified value
+		TARGETKEYS=$(echo $TARGETKEYS${FINALW})
+		# Grab known key without line number
+		# Will use this with SED
+		ORIGINALKEYS=$(echo "$line" | egrep -o 'key[0-9]+="[0-9]+')
+		sed -i ''"$location"'s/'"$ORIGINALKEYS"'/'"$TARGETKEYS"'/g' "${PORT_UI}"/"${file_chosen}"
+	done < "${PORT_UI}"/knownkeys.txt
+fi
+
+# Remove unneeded txt file
+if [ -f "${PORT_UI}"/knownkeys.txt ]; then
+	rm -rf "${PORT_UI}"/knownkeys.txt
+fi
+
+}
+
+# Call functions for porting all applicable values.
+KEYBOARDTEMP
+XX
+YY
+HHEIGHT
+WWIDTH
+WW
+HH
+VVALUE_OVERHAUL
+
+}
+
+# Resize fonts if font is ttf only
+# TWRP supports ttf as of 2.8.1.0 onward
+GOTOTTFFONT() {
+
+# Some themes have multiple xml files.
+# Ask user which one to port.
+count=0
+for XML_FILE in $(find "${PORT_UI}" -type f -iname "*.xml"); do
+	count=$(($count+1))
+	XML_FILE=$(basename ${XML_FILE})
+	# Store filenames in array
+	file_array[$count]=${XML_FILE}
+	echo "  ($count) ${XML_FILE}" >> "${PORT_UI}"/temp.list
+done
+
+if [ "$count" -gt "1" ]; then
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+
+	echo " "
+	cat "${PORT_UI}"/temp.list
+	echo " "
+	read "SELECTION?Please enter number to port [0 to cancel]: "
+elif [ "$count" -lt "2" ]; then
+	SELECTION=1
+fi
+
+
+if [ "$SELECTION" == "0" ]; then
+	rm -f "${PORT_UI}"/temp.list
+	HEADSUP
+elif [ "`echo $SELECTION | sed 's/[0-9a-zA-Z]*//'`" == "" ]; then
+	file_chosen=${file_array[$SELECTION]}
+		if [ "$file_chosen" == "" ]; then
+			echo " "
+			echo "Please make correct selection."
+			sleep 3
+			rm -f "${PORT_UI}"/temp.list
+			GOTOTTFFONT
+		fi
+fi
+
+rm -f "${PORT_UI}"/temp.list
+
+if output=$(egrep -n "resource name=" "${PORT_UI}"/"${file_chosen}" | egrep "ttf"); then
+	echo "$output" >> "${PORT_UI}"/font.txt
+	# Begin while loop
+	clear; while IFS= read -r line; do
+		location=$(echo "$line" | egrep -o '[0-9]+:' | egrep -o '[0-9]+')
+		TTFSIZE=$(echo "$line" | egrep -o ' size="[0-9]+" ' | egrep -o '[0-9]+')
+			if [ -n "$location" -a "$TTFSIZE" -gt 0 -a "$TTFSIZE" -gt 1 ]; then
+				SIZEW=$TTFSIZE
+				# Calculate old size for new size of each image.
+				# Round fractions up and down for each image.
+		 		FINALW=$(awk 'BEGIN{print int("'$BASEW'"/("'$PORTW'"/"'$SIZEW'")+0.5)}')
+				echo " "
+				echo "Changing size='$TTFSIZE' to size='$FINALW'"
+				# Change old value to new value based on line number.
+			 	sed -i ''"$location"'s/'"$TTFSIZE"'/'"$FINALW"'/g' "${PORT_UI}"/"${file_chosen}"
+			fi
+	done < "${PORT_UI}"/font.txt;
+
+	# Remove unneeded txt file after while loop is finished.
+	if [ -f "${PORT_UI}"/font.txt ]; then
+		rm -rf "${PORT_UI}"/font.txt
+	fi
+	sleep 2
+else
+	echo " "
+	echo "No TTF fonts were found! Resize manually."
+	sleep 3
+fi
+
+if [ $OPT == "4" ]; then
+	HEADSUP
+fi
+
+}
+
+# Have user input both resolutions and the storage location of the theme to be ported.
+# If input is invalid then loop back to the function until they get it right.
+BASE_DEVICE() {
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Enter your resolution, ex. 480x800:"
+	echo " "
+	read "BASE_RESOLUTION?Base Resolution: "
+	B_RES_W=$(echo "$BASE_RESOLUTION" | egrep -o '[0-9]+x' | egrep -o '[0-9]+')
+	B_RES_H=$(echo "$BASE_RESOLUTION" | egrep -o 'x[0-9]+' | egrep -o '[0-9]+')
+	BASE_RESOLUTION_CHECK=$(echo "$B_RES_W"'x'"$B_RES_H")
+		if [ "$BASE_RESOLUTION" == "$BASE_RESOLUTION_CHECK" ] ; then
+ 			# Your Resolution
+ 			BASEW=$(echo "$B_RES_W")
+ 			BASEH=$(echo "$B_RES_H")
+		else
+			echo " "
+			echo "Please input correct layout for your resolution."
+			echo "An example would be, 480x800."
+			echo " "
+			echo "Press ANY key when ready..."
+			read -n1 any_key
+			clear; BASE_DEVICE
+		fi
+	if [ "$OPT" == "7" ]; then
+		HEADSUP
+	fi
+}
+
+PORT_DEVICE() {
+	clear; echo "TWRP Theme Porter - version $(echo "$VERSION")"
+	echo " "
+	echo "Enter their resolution, ex. 720x1280:"
+	echo " "
+	read "PORT_RESOLUTION?Port Resolution: "
+	P_RES_W=$(echo "$PORT_RESOLUTION" | egrep -o '[0-9]+x' | egrep -o '[0-9]+')
+	P_RES_H=$(echo "$PORT_RESOLUTION" | egrep -o 'x[0-9]+' | egrep -o '[0-9]+')
+	PORT_RESOLUTION_CHECK=$(echo "$P_RES_W"'x'"$P_RES_H")
+		if [ "$PORT_RESOLUTION" == "$PORT_RESOLUTION_CHECK" ] ; then
+ 			# Their Resolution
+ 			PORTW=$(echo "$P_RES_W")
+ 			PORTH=$(echo "$P_RES_H")
+		else
+			echo " "
+			echo "Please input correct layout for their resolution."
+			echo "An example would be, 720x1280."
+			echo " "
+			echo "Press ANY key when ready..."
+			read -n1 any_key
+			clear; PORT_DEVICE
+		fi
+	if [ "$OPT" == "8" ]; then
+		HEADSUP
+	fi
+}
+
+THEME_DIRECTORY() {
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Enter directory to the theme, ex. /sdcard/TWRP:"
+	echo " "
+	read "PORT_THEME?Enter Path: "
+		# Check to see if directory exists
+		if [ -d "${PORT_THEME}" ] ; then
+			if echo "${PORT_THEME}" | grep -o /$ >/dev/null 2>&1; then
+				PORT_THEME="${PORT_THEME%?}"
+			fi
+ 			PORT_UI=$(echo "${PORT_THEME}")
+ 			P_IMAGES=$(echo "${PORT_THEME}")
+		else
+			echo " "
+			echo ""${PORT_THEME}" is not a directory"
+			echo " "
+			echo "Press ANY key when ready..."
+			read -n1 any_key
+			clear; THEME_DIRECTORY
+		fi
+	if [ "$OPT" == "6" ]; then
+		HEADSUP
+	fi
+}
+
+# Is Busybox and GM installed?
+# Check Root Status on devices.
+
+if [[ -e $(command -v busybox) ]]; then
+	ROOTCHECK=$(whoami 2>&1 | awk '{ print $4 }')
+	if [[ $(command -v su) ]]; then
+		if [[ $ROOTCHECK -eq "0" ]]; then
+			SU=
+			if [[ -e $(command -v gm) ]]; then
+				echo null > /dev/null
+			else
+				clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+				echo " "
+				echo "GraphicsMagick is not installed!"
+				echo "It is required to port TWRP Images!"
+				sleep 5
+			fi
+		else
+			SU="su -c"
+			if [[ -e $(command -v gm) ]]; then
+				echo null > /dev/null
+			else
+				clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+				echo " "
+				echo "GraphicsMagick is not installed!"
+				echo "It is required to port TWRP Images!"
+				sleep 5
+			fi
+		fi
+	else
+		clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+		echo " "
+		echo "Your device must be rooted!"
+		sleep 4
+		clear; exit 0
+	fi
+else
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Busybox is not installed! Aborting!"
+	sleep 4
+	clear; exit 0
+fi
+
+# This is for development purposes only.
+# By calling on this script followed by the arg, clean, it will remove the embedded data in this script.
+# May require root privileges prior to calling it.
+if [ "$1" == "clean" ]; then
+	sed -i '/^\__EMBEDDED_DATA_BELOW__/,$ d' "$(dirname $0)"/TWRPPORTER
+	clear; echo "Embedded data removed!"
+	sleep 1.5
+	exit 0
+fi
+
+#Call on functions
+THEME_DIRECTORY
+BASE_DEVICE
+PORT_DEVICE
+
+
+HEADSUP() {
+CHECKGM=`command -v gm`
+CHECKPNGCRUSH=`command -v pngcrush`
+if [ ! $CHECKGM ] && [ ! $CHECKPNGCRUSH ]; then
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Please select your option:"
+	echo "1. Port TWRP Images (GM)"
+	echo "2. Port TWRP XML"
+	echo "3. Port Images (GM) & XML"
+	echo "4. Resize TTF Fonts"
+	echo "5. Optimize PNG Image's (pngcrush)"
+	echo "6. Change Theme Directory"
+	echo "7. Change Base Resolution"
+	echo "8. Change Port Resolution"
+	echo "9. Install GraphicsMagick"
+	echo "10. Install pngcrush"
+	echo "Q/q - Exit Script"
+	echo " "
+	read "OPT?Option: "
+	case $OPT in
+		1) GOTOTWRPIMAGE ;;
+		2) TWRPUILOOP ;;
+		3) GOTOTWRPIMAGE && TWRPUILOOP ;;
+		4) GOTOTTFFONT ;;
+		5) PNGCRUSH ;;
+		6) THEME_DIRECTORY ;;
+		7) BASE_DEVICE ;;
+		8) PORT_DEVICE ;;
+		9) INSTALLGM ;;
+		10) INSTALLPNGCRUSH ;;
+		Q) clear; echo "Goodbye"; read; clear; exit ;;
+		q) clear; echo "Goodbye"; read; clear; exit ;;
+		*) echo " "; echo "Invalid option - $OPT" >&2; sleep 2; HEADSUP ;;
+	esac
+elif [[ -n $CHECKGM ]] && [[ -n $CHECKPNGCRUSH ]]; then
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Please select your option:"
+	echo "1. Port TWRP Images (GM)"
+	echo "2. Port TWRP XML"
+	echo "3. Port Images (GM) & XML"
+	echo "4. Resize TTF Fonts"
+	echo "5. Optimize PNG Image's (pngcrush)"
+	echo "6. Change Theme Directory"
+	echo "7. Change Base Resolution"
+	echo "8. Change Port Resolution"
+	echo "9. Uninstall GraphicsMagick"
+	echo "10. Uninstall pngcrush"
+	echo "Q/q - Exit Script"
+	echo " "
+	read "OPT?Option: "
+	case $OPT in
+		1) GOTOTWRPIMAGE ;;
+		2) TWRPUILOOP ;;
+		3) GOTOTWRPIMAGE && TWRPUILOOP ;;
+		4) GOTOTTFFONT ;;
+		5) PNGCRUSH ;;
+		6) THEME_DIRECTORY ;;
+		7) BASE_DEVICE ;;
+		8) PORT_DEVICE ;;
+		9) UNINSTALLGM; clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"; echo " "; echo "GraphicsMagick is uninstalled!"; sleep 2; HEADSUP ;;
+		10) UNINSTALLPNGCRUSH; clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"; echo " "; echo "pngcrush is uninstalled!"; sleep 2; HEADSUP ;;
+		Q) clear; echo "Goodbye"; read; clear; exit ;;
+		q) clear; echo "Goodbye"; read; clear; exit ;;
+		*) echo " "; echo "Invalid option - $OPT" >&2; sleep 2; HEADSUP ;;
+	esac
+elif [[ -z $CHECKGM ]] && [[ -n $CHECKPNGCRUSH ]]; then
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Please select your option:"
+	echo "1. Port TWRP Images (GM)"
+	echo "2. Port TWRP XML"
+	echo "3. Port Images (GM) & XML"
+	echo "4. Resize TTF Fonts"
+	echo "5. Optimize PNG Image's (pngcrush)"
+	echo "6. Change Theme Directory"
+	echo "7. Change Base Resolution"
+	echo "8. Change Port Resolution"
+	echo "9. Install GraphicsMagick"
+	echo "10. Uninstall pngcrush"
+	echo "Q/q - Exit Script"
+	echo " "
+	read "OPT?Option: "
+	case $OPT in
+		1) GOTOTWRPIMAGE ;;
+		2) TWRPUILOOP ;;
+		3) GOTOTWRPIMAGE && TWRPUILOOP ;;
+		4) GOTOTTFFONT ;;
+		5) PNGCRUSH ;;
+		6) THEME_DIRECTORY ;;
+		7) BASE_DEVICE ;;
+		8) PORT_DEVICE ;;
+		9) INSTALLGM ;;
+		10) UNINSTALLPNGCRUSH; clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"; echo " "; echo "pngcrush is uninstalled!"; sleep 2; HEADSUP ;;
+		Q) clear; echo "Goodbye"; read; clear; exit ;;
+		q) clear; echo "Goodbye"; read; clear; exit ;;
+		*) echo " "; echo "Invalid option - $OPT" >&2; sleep 2; HEADSUP ;;
+	esac
+elif [[ -n $CHECKGM ]] && [[ -z $CHECKPNGCRUSH ]]; then
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Please select your option:"
+	echo "1. Port TWRP Images (GM)"
+	echo "2. Port TWRP XML"
+	echo "3. Port Images (GM) & XML"
+	echo "4. Resize TTF Fonts"
+	echo "5. Optimize PNG Image's (pngcrush)"
+	echo "6. Change Theme Directory"
+	echo "7. Change Base Resolution"
+	echo "8. Change Port Resolution"
+	echo "9. Uninstall GraphicsMagick"
+	echo "10. Install pngcrush"
+	echo "Q/q - Exit Script"
+	echo " "
+	read "OPT?Option: "
+	case $OPT in
+		1) GOTOTWRPIMAGE ;;
+		2) TWRPUILOOP ;;
+		3) GOTOTWRPIMAGE && TWRPUILOOP ;;
+		4) GOTOTTFFONT ;;
+		5) PNGCRUSH ;;
+		6) THEME_DIRECTORY ;;
+		7) BASE_DEVICE ;;
+		8) PORT_DEVICE ;;
+		9) UNINSTALLGM; clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"; echo " "; echo "GraphicsMagick is uninstalled!"; sleep 2; HEADSUP ;;
+		10) INSTALLPNGCRUSH ;;
+		Q) clear; echo "Goodbye"; read; clear; exit ;;
+		q) clear; echo "Goodbye"; read; clear; exit ;;
+		*) echo " "; echo "Invalid option - $OPT" >&2; sleep 2; HEADSUP ;;
+	esac
+fi
+}
+
+# Uninstall pngcrush
+UNINSTALLPNGCRUSH() {
+
+if [ -x "/system/bin/pngcrush" ]; then
+	# Mount system as RW.
+	$SU busybox mount -o remount,rw -t auto /system
+	$SU busybox rm -rf "/system/bin/pngcrush"
+	# Mount system as RO.
+	$SU busybox mount -o remount,ro -t auto /system
+fi
+}
+
+# Uninstall GM
+UNINSTALLGM() {
+
+if [ -x "/system/bin/gm" ]; then
+	# Mount system as RW.
+	$SU busybox mount -o remount,rw -t auto /system
+	$SU busybox rm -rf "/system/bin/gm"
+	# Mount system as RO.
+	$SU busybox mount -o remount,ro -t auto /system
+fi
+}
+
+INSTALLPNGCRUSH() {
+
+# Call function here
+if [ -z $OPT ]; then
+	HEADSUP
+else
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Installing pngcrush!"
+	echo " "
+
+	sleep 2
+
+	TMPDIR=`$SU mkdir /data/local/tmp/selfextract.MyMind`
+	TMPDIR2="/data/local/tmp/selfextract.MyMind"
+
+	ARCHIVE=`awk '/^__EMBEDDED_DATA_BELOW__/ {print NR + 1; exit 0; }' $0`
+
+	$SU tail -n+$ARCHIVE $0 | $SU tar -xz -C "$TMPDIR2"
+
+	$SU chmod -R 755 "$TMPDIR2"
+
+	# Mount system as RW.
+	$SU busybox mount -o remount,rw -t auto /system
+
+	$SU busybox mv "$TMPDIR2"/pngcrush "/system/bin/pngcrush"
+
+	CDIR=`pwd`
+
+	cd $CDIR
+	$SU rm -r "$TMPDIR2"
+
+	# Mount system as RO.
+	$SU busybox mount -o remount,ro -t auto /system
+
+	echo " "
+	echo "pngcrush has been installed!"
+
+	sleep 2
+
+	HEADSUP
+fi
+}
+
+INSTALLGM() {
+
+# Call function here
+if [ -z $OPT ]; then
+	HEADSUP
+else
+	clear; echo "TWRP Theme Porter - Version $(echo "$VERSION")"
+	echo " "
+	echo "Installing GraphicsMagick!"
+	echo " "
+
+	sleep 2
+
+	TMPDIR=`$SU mkdir /data/local/tmp/selfextract.MyMind`
+	TMPDIR2="/data/local/tmp/selfextract.MyMind"
+
+	ARCHIVE=`awk '/^__EMBEDDED_DATA_BELOW__/ {print NR + 1; exit 0; }' $0`
+
+	$SU tail -n+$ARCHIVE $0 | $SU tar -xz -C "$TMPDIR2"
+
+	$SU chmod -R 755 "$TMPDIR2"
+
+	# Mount system as RW.
+	$SU busybox mount -o remount,rw -t auto /system
+
+	$SU busybox mv "$TMPDIR2"/gm "/system/bin/gm"
+
+	CDIR=`pwd`
+
+	cd $CDIR
+	$SU rm -r "$TMPDIR2"
+
+	# Mount system as RO.
+	$SU busybox mount -o remount,ro -t auto /system
+
+	echo " "
+	echo "GraphicsMagick has been installed!"
+
+	sleep 2
+
+	HEADSUP
+fi
+}
+
+# Decide action based on given parameters
+INSTALLGM
+
+
+# This is here to insure the script doesn't read the embedded data below 
+# unless absolutely instructed to do so.
+exit 0
+
+# DO NOT PLACE ANYTHING BELOW THIS LINE!!!!!!!!!
+# This section is automatically generated from the build script!
+__EMBEDDED_DATA_BELOW__
